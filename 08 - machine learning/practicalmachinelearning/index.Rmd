@@ -1,0 +1,84 @@
+---
+title: "Machine Learning Assignment"
+author: "Marco Totolo"
+date: "8. Mai 2016"
+output: html_document
+---
+
+## Summary
+
+This document describe a possible solution to the Coursera Practical Machine Learning course assignment. 
+A training and a test datsest for Human Activity Recognition data are provided. Each record can be classified with an activity type ranging from "A" to "E".  
+After selecting from the dataset a subset of variables as predictors, a model has been obtained with a random forest algorithm with an estimated out of sample accuracy of about 99%.
+
+## Exploratory Analysis
+
+First we load the training and test datasets.
+
+```{r}
+if (!file.exists("pml-training.csv")) {
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                    "pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")) {
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                    "pml-testing.csv")
+}
+trainData<-read.csv("pml-training.csv",stringsAsFactors = F,
+                   na.strings = c("NA","#DIV/0!"))
+testData<-read.csv("pml-testing.csv",stringsAsFactors = F,
+                   na.strings = c("NA","#DIV/0!"))
+dim(trainData)
+```
+
+We can see that there are 160 variables, including the "classe" variable we want to predict. 
+We'll further split the training dataset in two and use the new training part to build our model and the new testing part to estimate the out of sample error.
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+set.seed(1121)
+inTrain<- createDataPartition(trainData$classe,p=0.6,list=FALSE)
+training<-trainData[inTrain,]
+testing<-trainData[-inTrain,]
+```
+
+The data is made up of single observations taken in time spans of varying lengths. Some variables contain data only at the end of each time interval, since they are summary variables referring to the whole interval. Since we want predictions based on each single observation, we're going to ignore those variables, which contain NAs for most of the records. 
+Moreover, we'll discard the variables with near zero variance.
+
+```{r}
+# discard summary variables and near zero variance variables
+predictors<-names(training)[!is.na(training[1,])&!nearZeroVar(training,
+                                                            saveMetrics = TRUE)$nzv]
+# delete the variable to predict from the list
+predictors<-predictors[predictors!="classe"]
+#delete the first variables with data unrelated to the HAR sensors
+predictors<-predictors[7:length(predictors)]
+# build a formula to be used in model building
+myform<-as.formula(paste("classe~",paste(predictors,collapse="+")))
+length(predictors)
+```
+We will try to build a model based on the 52 predictors we've chosen.
+
+## Model building
+We'll try two different model types: a decision tree and random forest algorithm.
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+set.seed(1121)
+fit1<-train(myform,data=training,method="rpart") # with decision tree
+fit2<-train(myform,data=training,method="rf") # with random forest
+```
+
+The estimated out-of-sample accuracy is:
+```{r, warning=FALSE, message=FALSE}
+pred1<-predict(fit1,testing)
+pred2<-predict(fit2,testing)
+confusionMatrix(pred1,testing$classe)$overall[1] # decision tree
+confusionMatrix(pred2,testing$classe)$overall[1] # random forest
+```
+
+## Conclusion
+The model generated with the random forest algorithm is the best one, with an estimated out-of-sample accuracy of about 99%. The predicted classes for the testing dataset are:
+```{r}
+testPred<-predict(fit2,testData)
+names(testPred)<-testData$problem_id
+testPred
+```
+

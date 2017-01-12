@@ -1,0 +1,189 @@
+---
+title: "Analysis of the mtcars dataset"
+author: "Marco Totolo"
+output: pdf_document
+---
+
+## Summary
+
+With reference to the mtcars dataset, we are interested to answer to the following points:
+
+1. Is an automatic or manual transmission better for MPG?
+2. Quantify the MPG difference between automatic and manual transmissions.
+
+We have tried to fit a model taking into account possible confounding variables (ignoring interaction terms).
+
+We have found that weight, number of cylinders and horsepower are the most influential factors for mpg. A manual transmission also seems to have a positive influence on mpg but the associated regression coefficient isn't statistically significant and therefore we can't answer question 2.
+
+```{r, echo=FALSE}
+mystep <- function(df,outcome,threshold=0.05,keep=NULL) {
+      # get the predictor list
+      predictors<-names(df)[names(df)!=outcome]
+      # dummy variables gets a special treatment later
+      f.predictors<-names(df)[sapply(df,is.factor)&names(df)!=outcome]
+      # create first fit with all variables
+      for (i in 1:length(predictors)-1) {
+            fit<-lm(as.formula(paste0(outcome,"~",paste0(predictors,collapse="+"))),df)
+            #get the pvalues
+            pvalues<-summary(fit)$coefficients[,4]
+            #drop the intercept value
+            pvalues<-pvalues[2:length(pvalues)]
+            #for factor variables, consider the lowest pvalue
+            for (j in f.predictors) {
+                  # get the min
+                  val<-min(pvalues[grepl(paste0("^",j),names(pvalues))],na.rm=T)
+                   # drop all values
+                  pvalues<-pvalues[!grepl(paste0("^",j),names(pvalues))]
+                  # add the minimum
+                  pvalues<-append(pvalues,val)
+                  # upadte names
+                  names(pvalues)[length(names(pvalues))]<-j
+            }
+            #exclude the variables to keep from the vector
+            for (k in keep) {
+                  pvalues<-subset(pvalues,!grepl(paste0("^",k),names(pvalues)))
+            }
+            #check if there's no non significant predictor
+            if (max(pvalues)<threshold) {
+                  return(fit)
+            }
+            #find the less significant predictor
+            todrop<-names(pvalues)[which.max(pvalues)]
+            #drop it from the list
+            predictors<-predictors[predictors!=todrop]
+            f.predictors<-f.predictors[f.predictors!=todrop]
+      }
+      return(fit)
+}
+```
+
+
+## Exploratory Analysis
+
+```{r}
+data(mtcars)
+dim(mtcars)
+```
+
+We can see that the dataset is composed of 32 observations of 11 variables. We'll first type cast the categorical variables and then plot a preliminary graph of mpg vs. am (Figure 1). We can see that there seems to be a dependence of mpg from am, but possibly there are further confounding variables.
+
+```{r}
+mtcars$am<-as.factor(mtcars$am)
+levels(mtcars$am)<-list(automatic="0",manual="1")
+mtcars$vs<-as.factor(mtcars$vs)
+mtcars$cyl<-as.factor(mtcars$cyl)
+mtcars$gear<-as.factor(mtcars$gear)
+mtcars$carb<-as.factor(mtcars$carb)
+```
+
+## Modelling
+
+Let's try first to fit directly mpg to am:
+
+```{r}
+fit1<-lm(mpg~am,mtcars)
+summary(fit1)$adj.r.squared
+```
+
+We can see that the R squared is quite low, most of the variance is left unexplained. This suggests that there could be one or more confounding variables. There are different strategies to find which variables to add to our model. We could update our model one variable at a time and see if our R squared improves. Or we could use an automated process to do it for us, for example using the step() function that minimizes the AIC factor.
+
+We preferred defining a function that, starting from a fit that includes all of the possible variables, drops one variable at a time based on their relevance until we are left with the most relevant ones. You can find the definition of this function in the Appendix. Note that in this case the resulting fit is the same as the one we would obtain with the step() function.
+
+```{r}
+fit2<-mystep(mtcars,"mpg",keep="am")
+summary(fit2)$coeff
+summary(fit2)$adj.r.squared
+```
+
+We can see now that the R squared is much better. In this model the influence of having a manual transmission on mpg consumption is 1.8 mile/gallon. However, note that the p-value (>0.2) tells us that the coefficient for the associated predictor is not statistically significant, so in the end we can't satisfactory quantify the influence of the type of transmission on mpg.
+
+Let's turn now to the diagnostics for the model. The residuals distribution (Figure 2) and qqplot (Figure 3) show that the residual distribution is quite normal. The Shapiro-Wilk test for normality also has a satisfactory value (>0.1)
+
+```{r}
+shapiro.test(fit2$residuals)$p.value
+```
+
+The hat-values are all quite similar, with tolerable exceptions:
+
+```{r}
+as.vector(round(hatvalues(fit2), 3))
+```
+
+## Conclusions
+
+We have found a satisfactory linear model for the mtcars dataset, predicting mpg from weight, number of cylinders, horse power and automatic transmission type. Unfortunately the coefficient for this last parameter is not statistically significant, therefore we can't quantify its influence on mpg. This is most probably because cars with manual transmission tend to be smaller and with fewer cylinders. See Figure 4 for a comparison of all the variables of the model.
+
+
+## Appendix
+
+```{r, echo=FALSE, fig.height=4}
+library(ggplot2)
+ggplot(mtcars,aes(am,mpg)) +
+      geom_jitter(size=2,position=position_jitter(0.2),alpha=0.4) +
+      ggtitle("Figure 1")
+
+plot(fit2,1)
+title(main="Figure 2")
+
+plot(fit2,2)
+title(main="Figure 3")
+
+ggplot(mtcars,(aes(wt,mpg,fill=hp,shape=am)))+
+      geom_point(size=4,alpha=0.5)+
+      facet_grid(cyl~.,labeller=label_both)+
+      scale_fill_distiller(palette="Spectral")+
+      scale_shape_manual(values=c(21,22)) +
+      ggtitle("Figure 4")
+```
+
+\newpage
+
+**Definition of mystep function**
+
+```{r}
+# parameters:
+# -df: dataframe for the linerar model
+# -outcome: string name of the outcome variable
+# -threshold: pvalue level under which the regressors are considered significant
+# -keep: string or string vector of variable names to keep in the model, independently of threshold
+# -returns a variable of class "lm"
+mystep <- function(df,outcome,threshold=0.05,keep=NULL) {
+      # get the predictor list
+      predictors<-names(df)[names(df)!=outcome]
+      # dummy variables gets a special treatment later
+      f.predictors<-names(df)[sapply(df,is.factor)&names(df)!=outcome]
+      # create first fit with all variables
+      for (i in 1:length(predictors)-1) {
+            fit<-lm(as.formula(paste0(outcome,"~",paste0(predictors,collapse="+"))),df)
+            #get the pvalues
+            pvalues<-summary(fit)$coefficients[,4]
+            #drop the intercept value
+            pvalues<-pvalues[2:length(pvalues)]
+            #for factor variables, consider the lowest pvalue
+            for (j in f.predictors) {
+                  # get the min
+                  val<-min(pvalues[grepl(paste0("^",j),names(pvalues))],na.rm=T)
+                   # drop all values
+                  pvalues<-pvalues[!grepl(paste0("^",j),names(pvalues))]
+                  # add the minimum
+                  pvalues<-append(pvalues,val)
+                  # upadte names
+                  names(pvalues)[length(names(pvalues))]<-j
+            }
+            #exclude the variables to keep from the vector
+            for (k in keep) {
+                  pvalues<-subset(pvalues,!grepl(paste0("^",k),names(pvalues)))
+            }
+            #check if there's no non significant predictor
+            if (max(pvalues)<threshold) {
+                  return(fit)
+            }
+            #find the less significant predictor
+            todrop<-names(pvalues)[which.max(pvalues)]
+            #drop it from the list
+            predictors<-predictors[predictors!=todrop]
+            f.predictors<-f.predictors[f.predictors!=todrop]
+      }
+      return(fit)
+}
+```

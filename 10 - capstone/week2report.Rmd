@@ -1,0 +1,378 @@
+---
+title: "CS Capstone Milestone Report"
+author: "mtotolo"
+date: "09/03/2016"
+output: html_document
+---
+
+## Summary
+
+In this doucment I'll perform a first exploratory analysis of the text datasets to be used for the Coursera Capstone Project.
+
+The objective is to get a feel of the features of the documents and words in terms of frequencies of occurence.
+
+The results obtained here will be used to build a prediction algorithm capable of guessing the next word based on the preceding n words.
+
+## Loading and pre-processing the data
+
+There are 3 text datasets to analyze: "blogs", "tweets" and "news". All of them are quite big and it may be a good choice to sample them instead of analyzing the whole files, expecially when computing word frequencies.
+
+I will first create a dataframe with some basic information about the files. For this I'll just load the whole files.
+
+```{r, cache=TRUE, results="hide",warning=FALSE,message=FALSE}
+twitter<-readLines("Coursera-SwiftKey/final/en_US/en_US.twitter.txt")
+news<-readLines("Coursera-SwiftKey/final/en_US/en_US.news.txt")
+blogs<-readLines("Coursera-SwiftKey/final/en_US/en_US.blogs.txt")
+```
+
+Then I'll create a dataframe with some basic stats and print it out.
+
+```{r, cache=TRUE, warning=FALSE,message=FALSE,results="asis"}
+library(dplyr)
+library(stringi)
+library(pander)
+allFiles<-list(twitter,news,blogs)
+basicInfo<-data.frame(file=c("twitter","news","blogs"))
+# get the file size on disk
+basicInfo <- basicInfo %>% mutate(size=utils:::format.object_size(file.info(
+      paste0("Coursera-SwiftKey/final/en_US/en_US.",file,".txt"))$size, "auto"))
+# get the number of documents in the file
+basicInfo <- basicInfo %>% mutate(NofDocs=sapply(allFiles,length))
+# get the average number of words in a document
+basicInfo <- basicInfo %>% mutate(avgWordsInDoc=
+            sapply(allFiles,function(x) 
+                  summary(stri_count_words(x))["Mean"]))
+# get the average number of sentences in a document
+basicInfo <- basicInfo %>% mutate(avgSentencesInDoc=
+            sapply(allFiles,function(x)
+                  summary(stri_count_boundaries(x,type="sentence"))["Mean"]))
+# calculate average words per sentence
+basicInfo <- basicInfo %>% mutate(avgWordsPerSentence=avgWordsInDoc/avgSentencesInDoc)
+
+pandoc.table(basicInfo)
+```
+
+In order to perform some more advanced analysis on the word frequencies, I'll use the "tm" package to create bag of words style matrixes and then calculate and compare the word frequences in the files.
+
+The files are quite large, so one option would be to sample them and perform the analysis on the sampled files. Another option is to analyse the files in chunks and then combine the chunks together. I'll do both for unigrams and only sample the files for 2-grams and 3-grams.
+To compute the whole files I've used the following code (example for the news.txt file).
+
+```{r, eval=FALSE}
+library(tm)
+library(slam)
+
+MaxLen=length(readLines("Coursera-SwiftKey/final/en_US/en_US.news.txt",
+                 encoding="UTF-8"))
+Len=floor(MaxLen/20)
+
+# repeat for 20 chunks
+for (i in 1:20) {
+      sk<-(i-1)*Len
+      if (i!=20) readN<-Len
+      else readN <- -1
+      selectedrows<-scan("Coursera-SwiftKey/final/en_US/en_US.news.txt",
+                         what="character", n=readN,sep="\n", skip=sk,quiet=T,
+                         encoding = "UTF-8")
+      # remove unrecognizable character with the function iconv
+      selectedrows <- sapply(selectedrows,function(row) 
+            iconv(row, "latin1", "ASCII", sub=""))
+      # create Corpus object
+      myCorpus<-Corpus(VectorSource(selectedrows))
+      # load a list of undesired words and apply preprocessing on the Corpus.
+      # see the preProcess function below for details.
+      profanity<-readLines("profanity.txt")
+      myCorpus<-preProcess(myCorpus,profanity)
+      # create a DocumentTermMatrix object
+      dtm <- DocumentTermMatrix(myCorpus)
+      # create word frequency vector
+      freq <- sort(col_sums(dtm),decreasing = T)
+      # save file to disk for later processing
+      fileName<-paste0("Part",i,".csv")
+      write.csv(freq,file=fileName)
+}
+
+```
+
+The frequency files can then be combined together with the following function, that iterativly combines two files together.
+
+```{r,eval=FALSE}
+#mergeAll will merge all the 20 frequency files named "x"
+mergeAll<-function(x) {
+      df1<-as.data.frame(read.csv(paste0(x,"1.csv")),stringAsFactors=F)
+      names(df1)<-c("label","freq")
+      df1<-df1 %>% group_by(label) %>% summarise_each(funs(sum))
+      df1 %>% ungroup()
+      df1$label<-as.character(df1$label)
+      for (i in 2:20) {
+            df2<-as.data.frame(read.csv(paste0(x,i,".csv")),stringAsFactors=F)
+            names(df2)<-c("label","freq2")
+            df2<-df2 %>% group_by(label) %>% summarise_each(funs(sum))
+            df2 %>% ungroup()
+            df2$label<-as.character(df2$label)
+            df1<-full_join(df1,df2,by="label")
+            df1<-df1 %>% rowwise %>% mutate(freq=sum(freq,freq2,na.rm=T)) %>% 
+                  select(-freq2)
+      }
+      df1 <- df1 %>% arrange(desc(freq))
+      write.csv(df1,file=paste0(x,"0.csv",row.names = F)
+}
+
+```
+
+At this point point I have a frequency file for unigrams for each of the datasets.
+The pre-processing function that I've used in the code above is the following:
+
+```{r,warning=FALSE}
+preProcess <- function(myCorpus,toFilter) {
+      myCorpus <- tm_map(myCorpus, removePunctuation) # remove punctuation
+      myCorpus <- tm_map(myCorpus, tolower) # all lower case
+      myCorpus <- tm_map(myCorpus, removeWords, toFilter) # filter undesired words
+      myCorpus <- tm_map(myCorpus, removeNumbers) # remove numbers
+      myCorpus <- tm_map(myCorpus, stripWhitespace) #remove whitespace
+      myCorpus <- tm_map(myCorpus, PlainTextDocument) #convert to plain text
+      return(myCorpus)
+}
+```
+
+Note that I haven't removed any stopword from the text, it might be worth to do that to have a feeling of the most interesting words in the datasets.
+Now I'll create a dataframe with the sampled files (at 5%).
+
+```{r, cache=TRUE,message=FALSE,warning=FALSE}
+library(tm)
+library(slam)
+library(dplyr)
+#sampling function, take the filename and the sampling rate as input
+loadSample <- function(what,p) {
+      textfile<-file(paste0("Coursera-SwiftKey/final/en_US/en_US.",what,".txt"),
+                     open="r")
+      filelength=length(readLines(textfile))
+      close(textfile)
+      textfile<-file(paste0("Coursera-SwiftKey/final/en_US/en_US.",what,".txt"),
+                     open="r")
+      rowselect=rbinom(filelength,1,p)
+      selectedrows<-NULL
+      y=0
+      for (i in rowselect) {
+            if(i) {
+                  selectedrows<-c(selectedrows,
+                                  scan(textfile,what="character",n=1,sep="\n",
+                                       skip=y,quiet=T,encoding = "UTF-8"))
+                  
+                  y=0
+            }
+            else y<-y+1
+      }
+      close(textfile)
+      selectedrows <- sapply(selectedrows,function(row) 
+            iconv(row, "latin1", "ASCII", sub="")) #remove unrecognizable chars
+      myCorpus<-Corpus(VectorSource(selectedrows))
+      return(myCorpus)
+}
+
+set.seed(123)
+SampledDocs<-NULL
+SampledDocs$blogs<-loadSample("blogs",0.05) #Load 5% of the document
+SampledDocs$news<-loadSample("news",0.05) #Load 5% of the document
+SampledDocs$twitter<-loadSample("twitter",0.05) #Load 5% of the document
+profanity<-readLines("profanity.txt") #load undesired word list
+
+freqStop<-data.frame(label=character())
+for (i in (c("blogs","twitter","news"))) {
+      ProcessedDocs<-preProcess(SampledDocs[[i]],profanity)
+      dtm <- DocumentTermMatrix(ProcessedDocs)
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      freqStop<-full_join(freqStop,freq,by="label")
+}
+
+```
+
+Now let's do the same but without stopwords.
+
+```{r, cache=TRUE,warning=FALSE}
+#preprocess function with stopwords removal
+preProcess2 <- function(myCorpus,toFilter) {
+      myCorpus <- tm_map(myCorpus, removePunctuation) # remove punctuation
+      myCorpus <- tm_map(myCorpus, tolower) # all lower case
+      myCorpus <- tm_map(myCorpus, removeWords, toFilter) # filter undesired words
+      myCorpus <- tm_map(myCorpus, removeNumbers) # remove numbers
+      myCorpus <- tm_map(myCorpus, removeWords, stopwords("english")) #remove stopwords
+      myCorpus <- tm_map(myCorpus, stripWhitespace) #remove whitespace
+      myCorpus <- tm_map(myCorpus, PlainTextDocument) #convert to plain text
+      return(myCorpus)
+}
+
+freqNoStop<-data.frame(label=character())
+for (i in (c("blogs","twitter","news"))) {
+      ProcessedDocs<-preProcess2(SampledDocs[[i]],profanity)
+      dtm <- DocumentTermMatrix(ProcessedDocs)
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      freqNoStop<-full_join(freqNoStop,freq,by="label")
+}
+
+```
+
+
+Now let's load the full frequency files I've saved on disk.
+
+```{r,cache=TRUE,warning=FALSE}
+newsUni<-read.csv("newsPart0.csv")
+blogsUni<-read.csv("blogsPart0.csv")
+twitterUni<-read.csv("twitterPart0.csv")
+freqFull<-full_join(newsUni,blogsUni,by="label")
+freqFull<-full_join(freqFull,twitterUni,by="label")
+names(freqFull)<-c("label","news","blogs","twitter")
+```
+
+I have now three frequency dataframes for unigrams: one with the full files, one with the sampled files and one without stopwords.
+I will now create the same dataframes, with stopwords, for 2-grams and 3-grams.
+
+```{r,cache=TRUE,warning=FALSE}
+bigramTokenizer <- function(x) {
+      unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
+}
+trigramTokenizer <- function(x) {
+      unlist(lapply(ngrams(words(x), 3), paste, collapse = " "), use.names = FALSE)
+}
+
+BiGrams<-data.frame(label=character())
+TriGrams<-data.frame(label=character())
+for (i in (c("blogs","twitter","news"))) {
+      ProcessedDocs<-preProcess(SampledDocs[[i]],profanity)
+      dtm <- DocumentTermMatrix(ProcessedDocs,control=list(tokenizer=bigramTokenizer))
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      BiGrams<-full_join(BiGrams,freq,by="label")
+      dtm <- DocumentTermMatrix(ProcessedDocs,control=list(tokenizer=trigramTokenizer))
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      TriGrams<-full_join(TriGrams,freq,by="label")
+}
+
+```
+
+
+And again, without stopwords.
+
+```{r,cache=TRUE,warning=FALSE}
+BiGramsNoStop<-data.frame(label=character())
+TriGramsNoStop<-data.frame(label=character())
+for (i in (c("blogs","twitter","news"))) {
+      ProcessedDocs<-preProcess2(SampledDocs[[i]],profanity)
+      dtm <- DocumentTermMatrix(ProcessedDocs,control=list(tokenizer=bigramTokenizer))
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      BiGramsNoStop<-full_join(BiGramsNoStop,freq,by="label")
+      dtm <- DocumentTermMatrix(ProcessedDocs,control=list(tokenizer=trigramTokenizer))
+      freq <- as.data.frame(sort(col_sums(dtm),decreasing = T))
+      freq$label<-row.names(freq)
+      names(freq)<-c(i,"label")
+      TriGramsNoStop<-full_join(TriGramsNoStop,freq,by="label")
+}
+
+```
+
+
+## Exploratory Analysis
+
+Let's first plot the most frequent words for the unigram dataframes.
+
+```{r,message=FALSE,fig.width=8,fig.align="center",warning=FALSE,cache=TRUE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+#calculate relative frequencies
+dfs<-list(freqFull,freqStop,freqNoStop)
+for (i in 1:3) {
+      df<-dfs[[i]]
+      df$news<-df$news/sum(df$news,na.rm=T)
+      df$twitter<-df$twitter/sum(df$twitter,na.rm=T)
+      df$blogs<-df$blogs/sum(df$blogs,na.rm=T)
+      
+      #find the top 10 words for each file and merge them together
+      topWords<-arrange(df,desc(news))$label[1:10]
+      topWords<-c(topWords,arrange(df,desc(twitter))$label[1:10])
+      topWords<-c(topWords,arrange(df,desc(blogs))$label[1:10])
+      topWords<-unique(topWords)
+      dfTop<-df %>% filter(label %in% topWords)
+      
+      #gather columns for printing
+      dfTop<-gather(dfTop,"file","freq",2:4)
+      p<-ggplot(dfTop,aes(x=reorder(label,-freq), y=freq,fill=file)) +
+            geom_bar(position = "dodge",stat="identity") + ylab("Frequency") +
+            xlab("Words")
+      title<-NULL
+      if (i==1) title="Most Common Words from complete files"
+      else if (i==2) 
+            title="Most Common Words from sampled files, with stopwords"
+      else title="Most Common Words from sampled files, without stopwords"
+      print(p+ggtitle(title))
+           
+}
+
+```
+
+As one can expect, the relative frequencies for the most common words in the sampled files are higher than in the ones calculated for the full files, since the tail of less common words is much longer in the latter.
+
+Moreover, comparing the first two graphs with stopwords we can see that the language use in the three cases is actually different. For example, there's a lot more use of "you" in twitter than in the other datasets, while in the news dataset, the "said" word is much more used in comparison.
+
+In the third graph, the one without the stopwords, we can appreciate the difference between datasets much more. There's much more "love" and "good" and "thanks" in twitter than in the news.
+
+Now let's plot the same graphs for 2-grams and 3-grams.
+
+```{r,message=FALSE,fig.width=8,fig.align="center",warning=FALSE,cache=TRUE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+#calculate relative frequencies
+dfs<-list(BiGrams,TriGrams, BiGramsNoStop, TriGramsNoStop)
+for (i in 1:4) {
+      df<-dfs[[i]]
+      df$news<-df$news/sum(df$news,na.rm=T)
+      df$twitter<-df$twitter/sum(df$twitter,na.rm=T)
+      df$blogs<-df$blogs/sum(df$blogs,na.rm=T)
+      
+      #find the top 10 words for each file and merge them together
+      topWords<-arrange(df,desc(news))$label[1:10]
+      topWords<-c(topWords,arrange(df,desc(twitter))$label[1:10])
+      topWords<-c(topWords,arrange(df,desc(blogs))$label[1:10])
+      topWords<-unique(topWords)
+      dfTop<-df %>% filter(label %in% topWords)
+      
+      #gather columns for printing
+      dfTop<-gather(dfTop,"file","freq",2:4)
+      p<-ggplot(dfTop,aes(x=reorder(label,-freq), y=freq,fill=file)) +
+            geom_bar(position = "dodge",stat="identity") + ylab("Frequency") +
+            xlab("N-Grams")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+      title<-NULL
+      if (i==1) title="Most Common Words in Bigrams, with stopwords"
+      else if (i==2) title="Most Common Words in Trigrams, with stopwords"
+      else if (i==3) title="Most Common Words in Bigrams, without stopwords"
+      else title="Most Common Words in Trigrams, without stopwords"
+      print(p+ggtitle(title))
+           
+}
+
+
+```
+
+The differences between datasets are even bigger for 2-grams and (even more) for 3-grams and, again, they are even bigger when leaving out stopwords. Actually, the results for 3-grams without stopwords are probably very biased relative to the particular sample we've chosen, since the actual 3-grams do look pretty weird and the most common frequencies are very low. One option would be to reapeat the study with a higher sampling ratio.
+
+One thing that we can say is that the language used in blogs is more spread out and less biased than the one for the news and on twitter: the highest relative frequencies are clearly lower.
+
+## Conclusion
+
+The analysis helped understand which are the most commond words, 2-grams and 3-grams in the different datasets.
+
+The next step will be to create a prediction model. A starting point would be to consider the 2-grams and 3-grams data and use it to predict the most common word based on the first or the first two words.
+
+
+
+
+

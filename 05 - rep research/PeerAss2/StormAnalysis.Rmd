@@ -1,0 +1,176 @@
+# Most Harmful and Destructive Weather Event Types in the US 
+
+### Synopsis
+
+Based on the U.S. National Oceanic and Atmospheric Administration's (NOAA) Storm Database, this document aims to answer the following questions:
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+After the data processing steps described below, it has been found that the most harmful types of events are tornados and the ones with the greatest economic consequences are floods.
+
+### Data Processing
+
+First we download the database and load it into a variable.
+
+```{r, cache=TRUE}
+if (!file.exists("repdata-data-StormData.csv.bz2")) {
+      download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2","repdata-data-StormData.csv.bz2")
+}
+Alldata <- read.csv("repdata-data-StormData.csv.bz2", stringsAsFactors = F)
+```
+
+Then we check the dimensions and the variable names.
+
+```{r, cache = TRUE}
+dim(Alldata)
+names(Alldata)
+```
+
+The records in the dataset start in 1950 and the first years have much less recorded events than more recent ones. However, since we are interested in the sum total of each kind of event, this won't affect our analysis.
+
+There is still the possibility that in earlier years certain kinds of events were more often recorded than other types of events, introducing a bias. We'll consider this bias negligible for the sake of our analysis.
+
+There are more than 900000 records of 37 variables. We are interested only in a subset of those, namely only the variables relative to population and economic damage and only the records where those variables are greater than zero. 
+
+```{r}
+data <- Alldata[Alldata$FATALITIES!=0 | Alldata$INJURIES!=0 | Alldata$PROPDMG!=0
+                | Alldata$CROPDMG!=0,c("FATALITIES","INJURIES","EVTYPE","PROPDMG",
+                                       "PROPDMGEXP","CROPDMG","CROPDMGEXP")]
+```
+
+Let's see how many different kinds of events are on record.
+
+```{r}
+length(unique(data$EVTYPE))
+```
+
+There are 488 distinct types of events. On closer inspection, we can see that many event types are redundand and can be bundled together. For example:
+
+```{r}
+unique(data[grep("HEAT",data$EVTYPE,ignore.case =T),]$EVTYPE)
+```
+
+We'll apply the following transformations on the *EVTYPE* variable in order to have a more consistent event classification.
+
+```{r}
+data[grep("WARM|HEAT|HYPERTH",data$EVTYPE,ignore.case =T),]$EVTYPE <- "HEAT"
+data[grep("FLOOD|FLD",data$EVTYPE,ignore.case =T),]$EVTYPE <- "FLOOD"
+data[grep("STORM|TSTM|BLIZZARD",data$EVTYPE,ignore.case =T),]$EVTYPE <- "STORM"
+data[grep("WIND",data$EVTYPE,ignore.case =T),]$EVTYPE <- "WIND"
+data[grep("SNOW",data$EVTYPE,ignore.case =T),]$EVTYPE <- "SNOW"
+data[grep("COLD|FREEZ|LOW TEMP|WINT|HYPOTH|ICE|ICY|FROST|GLAZE",data$EVTYPE,
+          ignore.case =T),]$EVTYPE <- "COLD"
+data[grep("HURRICANE|TYPHOON",data$EVTYPE,ignore.case =T),]$EVTYPE <- "HURRICANE"
+data[grep("TORNADO",data$EVTYPE,ignore.case =T),]$EVTYPE <- "TORNADO"
+data[grep("SLIDE",data$EVTYPE,ignore.case =T),]$EVTYPE <- "LANDSLIDE"
+data[grep("FIRE",data$EVTYPE,ignore.case =T),]$EVTYPE <- "FIRE"
+data[grep("WATER",data$EVTYPE,ignore.case =T),]$EVTYPE <- "WATER"
+data[grep("WAVE|SURF|SWELL",data$EVTYPE,ignore.case =T),]$EVTYPE <- "WAVES"
+data[grep("MARINE",data$EVTYPE,ignore.case =T),]$EVTYPE <- "MARINE ACCIDENT"
+data[grep("DRY",data$EVTYPE,ignore.case =T),]$EVTYPE <- "DROUGHT"
+data[grep("AVALA",data$EVTYPE,ignore.case =T),]$EVTYPE <- "AVALANCHE"
+data[grep("DUST",data$EVTYPE,ignore.case =T),]$EVTYPE <- "DUST DEVIL"
+data[grep("RAIN|PRECIP|SLEET",data$EVTYPE,ignore.case =T),]$EVTYPE <- "RAIN"
+data[grep("HAIL",data$EVTYPE,ignore.case =T),]$EVTYPE <- "HAIL"
+data[grep("SEA",data$EVTYPE,ignore.case =T),]$EVTYPE <- "SEA"
+data[grep("LIGHTNING",data$EVTYPE,ignore.case =T),]$EVTYPE <- "LIGHTNING"
+data[grep("RIP C",data$EVTYPE,ignore.case =T),]$EVTYPE <- "RIP CURRENT"
+data[grep("FOG",data$EVTYPE,ignore.case =T),]$EVTYPE <- "FOG"
+```
+
+These substitutions are in a few cases arguable, but we'll assume that this is good enough for the current analysis.
+
+The new total number of distinct events is now much lower.
+
+```{r}
+length(unique(data$EVTYPE))
+```
+
+The variables relative to population health damage are *FATALITIES* and *INJURIES*. We don't need to apply any additional processing to those.
+
+We have two types of economic damage: to property and to crops (*PROPDMG* and *CROPDMG*). Both have an associated multiplier in the variables *PROPDMGEXP* and *CROPDMGEXP*. Let's have a look at these last two.
+
+```{r}
+unique(data$PROPDMGEXP)
+unique(data$CROPDMGEXP)
+```
+
+We'll associate the obvious multipliers to the identifiers "K","M" and "B". Due to lack of documentation, we'll associate no multiplier to all the other identifiers. This won't affect our analysis since the total economic damage will be driven by those records with millions or billions as multipliers.
+
+```{r}
+data$myCROPEXP <- 0
+data$myCROPEXP[grep("k",data$CROPDMGEXP,ignore.case = T)] <- 3
+data$myCROPEXP[grep("m",data$CROPDMGEXP,ignore.case = T)] <- 6
+data$myCROPEXP[grep("b",data$CROPDMGEXP,ignore.case = T)] <- 9
+data$myPROPEXP <- 0
+data$myPROPEXP[grep("k",data$PROPDMGEXP,ignore.case = T)] <- 3
+data$myPROPEXP[grep("m",data$PROPDMGEXP,ignore.case = T)] <- 6
+data$myPROPEXP[grep("b",data$PROPDMGEXP,ignore.case = T)] <- 9
+
+data$CropDamage <- data$CROPDMG * 10^(data$myCROPEXP-9)
+data$PropertyDamage <- data$PROPDMG * 10^(data$myPROPEXP-9)
+```
+
+We're now ready to sum all the records by event type.
+
+```{r}
+AggrData <- aggregate(cbind(INJURIES,FATALITIES,CropDamage,PropertyDamage)~EVTYPE,
+                      data=data,FUN=sum)
+```
+
+### Results
+
+Let's now answer the first question: which event type is most harmful to the population?
+
+We'll reorder the aggregate dataset by fatalities and use the injuries number to resolve ties. Then we'll plot the first five event types.
+
+```{r}
+AggrData <- AggrData[order(AggrData$FATALITIES,AggrData$INJURIES,
+                               decreasing=T),]
+
+plotdata<-matrix(c(head(AggrData$FATALITIES,5),head(AggrData$INJURIES/10,5)),
+                 nrow=2,byrow=T)
+
+barplot(plotdata,beside=T,col=c("darkblue","red"),names.arg=head(AggrData$EVTYPE,5),
+        cex.names=0.8, las=2,legend=c("Fatalities","Injuries"),
+        ylab="Number of Fatalities and Injuries/10")
+```
+
+Note that the injuries number is scaled down by a factor 10 to better fit in the bar plot.
+
+Clearly, **tornados** are the most harmful event type.
+
+Now, let's do the same for the second question: which event type causes the greatest economic damage?
+
+```{r}
+AggrData <- AggrData[order(AggrData$PropertyDamage,AggrData$CropDamage,
+                           decreasing=T),]
+
+plotdata<-matrix(c(head(AggrData$PropertyDamage,5),head(AggrData$CropDamage*10,5)),
+                 nrow=2,byrow=T)
+
+barplot(plotdata,beside=T,col=c("darkblue","red"),names.arg=head(AggrData$EVTYPE,5),
+        cex.names=0.8, las=2,legend=c("Property Damage","Crop Damage"),
+        ylab="Property (B$) and Crop Damage (B$*10)")
+```
+
+Note that crop damage is scaled up by a factor 10 to better fit in the bar plot.
+
+We've decided not to sum the two variables, in order to show the two different effects on property and crop damage. The sum total is in any case driven by property damage since crop damage is typically at least one order of magnitude smaller.
+
+The most destructive event types in this case are **floods**.
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,108 @@
+---
+title: "The Exponential Distribution and the CLT"
+author: "Marco Totolo"
+output: html_document
+---
+
+## Overview
+
+This document will show how the distribution of averages of N exponential random variables follows the Central Limit Theorem. This means that as the number of sample means increases, the distribution asymptotically tends to a normal distribution with mean equal to the exponential mean and standard deviation equal to the exponential standard deviation divided by the square root of N.
+
+##Simulations
+
+Let's first build an array of means of random exponential variables.
+
+As specified in the assignment, I will take 1000 means of 40 random exponential variables with lambda 0.2.
+
+```{r}
+set.seed(4)
+lambda<-0.2
+N<-40
+nosim<-1000
+expMeans <- NULL
+for (i in 1 : nosim) {
+      expMeans = c(expMeans, mean(rexp(N,lambda)))
+}
+```
+
+##Sample Mean versus Theoretical Mean
+
+The sample mean is 
+```{r}
+mean(expMeans)
+```
+which is very close to the the CLT theoretical value, the mean of the distribution of the averages of exponential variables,  1/lambda
+```{r}
+1/lambda
+```
+To show the CLT in action let's repeat the 1000 simulations with 3 different values of N. The histogram will be more concentrated near the theoretical value as N increases. 
+```{r}
+library(ggplot2)
+set.seed(8)
+lambda<-0.2
+Nvector<-c(10,40,100)
+nosim<-1000
+means<-NULL
+for (i in Nvector) {
+      N<-i
+      for (j in 1 : nosim) {
+            means <- c(means, mean(rexp(N,lambda)))
+      }
+}
+meansData <- data.frame(means=means,N=rep(Nvector,each=nosim))
+g<- ggplot(meansData,aes(means))
+g+facet_grid(.~N)+
+      geom_histogram(bins=30,color="black",fill="red",alpha=0.5)+
+      geom_vline(xintercept = 1/lambda,size=1)
+```
+
+##Sample Variance versus Theoretical Variance
+
+The sample variance is 
+```{r}
+var(expMeans)
+```
+which is very close to the the CLT theoretical value, the mean of the distribution of the averages of exponential variables,  1/(lambda^2*N)
+```{r}
+1/(lambda^2*N)
+```
+To show the CLT in action let's repeat the 1000 simulations with 3 different values of N. The histogram will be more concentrated near the theoretical value as N increases. 
+```{r}
+library(ggplot2)
+set.seed(16)
+lambda<-0.2
+Nvector<-c(10,40,100)
+nosim<-1000
+variances<-NULL
+for (i in Nvector) {
+      N<-i
+      for (j in 1 : nosim) {
+            variances <- c(variances, mean(rexp(N,lambda)))
+      }
+}
+varData <- data.frame(variances=variances,N=rep(Nvector,each=nosim))
+g<- ggplot(varData,aes(variances))
+g+facet_grid(.~N)+
+      geom_histogram(bins=30,color="black",fill="red",alpha=0.5)+
+      geom_vline(xintercept = 1/(lambda^2*N),size=1)
+```
+
+##Distribution
+
+```{r}
+lambda<-0.2
+N<-40
+nosim<-1000
+theorMean<-1/lambda
+theorSd<-1/(lambda*sqrt(N))
+expMeans <- NULL
+for (i in 1 : nosim) {
+      expMeans = c(expMeans, mean(rexp(N,lambda)))
+}
+sampleMean <-mean(expMeans)
+sampleSd<-sd(expMeans)
+      
+```
+
+
+g+geom_histogram(bins=20,color="black",fill="red",alpha=0.5)+geom_vline(xintercept = 5,size=1.5)

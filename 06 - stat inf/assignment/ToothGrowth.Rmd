@@ -1,0 +1,142 @@
+---
+title: "Exploring the ToothGrowth Dataset"
+author: "Marco Totolo"
+output: pdf_document
+---
+
+# Overview
+
+In this document we will analyze the ToothGrowth dataset and perform hypothesis testing in order to decide which of two delivery methods is more effective. The conclusion is that the first delivery method is better than the second for lower dose levels, but we cannot say if the first delivery method is better or worse than the second for the highest dose level.
+
+# Exploratory Analysis
+
+First let's load the data and some usuful libraries.
+```{r, message=FALSE}
+library(datasets)
+library(dplyr)
+library(ggplot2)
+data("ToothGrowth")
+```
+
+From the description of the dataset we know that
+
+*"The response is the length of odontoblasts (cells responsible for tooth growth) in 60 guinea pigs. Each animal received one of three dose levels of vitamin C (0.5, 1, and 2 mg/day) by one of two delivery methods, (orange juice or ascorbic acid (a form of vitamin C and coded as VC)."*
+
+In fact, we have 60 records of three variables:
+
+```{r}
+dim(ToothGrowth)
+head(ToothGrowth)
+```
+
+And we have 10 records for each supp/dose combination:
+
+```{r}
+with(ToothGrowth,table(supp,dose))
+```
+
+Let's plot them and see if there's a recognizable pattern.
+
+```{r}
+ToothGrowth$dose<-as.factor(ToothGrowth$dose)
+g<-ggplot(ToothGrowth,aes(x=dose,y=len, fill=dose))
+g+geom_boxplot()+facet_grid(.~supp)
+```
+
+It seems that for both delivery methods, increasing the dose also increses the tooth growth. Orange juice seems to be more effective, except for the higher dose level where they have comparable effects.
+
+# Hypothesis Testing
+
+Let's try and test one of the above observations.
+
+We want to test whether the two delivery methods have the same effect for dose=1. The null and alternative hypothesis are the following:
+
+*H_0: the means of the two samples are the same*
+
+*H_a: the means of the two samples are different*
+
+We will therefore perform a two sided t-test, assuming unequal variances (it's the more general case) and not paired samples (the guinea pigs were different for the two trials).
+
+```{r}
+g1<-ToothGrowth %>% filter(supp=="OJ" & dose==1) %>% select(len)
+g2<-ToothGrowth %>% filter(supp=="VC" & dose==1) %>% select(len)
+t.test(g1,g2,var.equal=F,paired=F)
+```
+
+The 5% confidence interval lies above zero: I have to reject the null hypothesis and the alternative hypothesis is likely to be true.
+
+Now let's perform multiple testing on all possible combinations of the 6 subgroups (dose/supp pairs). This means 15 t-tests. We will use the same assumptions as before.
+
+```{r}
+pValues<-NULL
+TestName<-NULL
+g<-NULL
+## create the 6 subgroups (supp/dose pairs) and their names
+for (i in unique(ToothGrowth$supp)) {
+      for (j in unique(ToothGrowth$dose)) {
+            g1<- ToothGrowth %>% filter(supp==i & dose==j) %>%
+                  select(len)
+            g<-c(g,g1)
+            TestName<-c(TestName,paste0(i,j))
+      }
+}
+
+## create the 15 combinations to be tested and their names
+
+g.pairs<-t(combn(g,2))
+TestName.pairs<-apply(t(combn(TestName,2)),1,paste0,collapse="=")
+#TestName.pairs<-c(TestName.pairs,
+#                  apply(t(combn(TestName,2)),1,paste0,collapse="<"))
+
+## perform 15 t-tests
+
+for (i in 1:nrow(g.pairs)) {
+      pValues<-c(pValues,t.test(g.pairs[i,][[2]],g.pairs[i,][[1]],
+                                alt="two.sided")$p.value)
+}
+#for (i in 1:nrow(g.pairs)) {
+#      pValues<-c(pValues,t.test(g.pairs[i,][[2]],g.pairs[i,][[1]],
+#                                alt="less")$p.value)
+#}
+```
+
+The list of 15 null hypothesis tested is the following:
+
+```{r}
+TestName.pairs
+```
+
+Of those 15, we have successfully rejected with a 5% level 13 of them:
+
+```{r}
+sum(pValues<0.05)
+```
+
+Actually, since we have performed multiple testing, we have to correct the p-values to ensure our 5% error rate. I will use the "BH" method.
+
+```{r}
+pValues<-p.adjust(pValues, method = "BH")
+```
+
+The new number of significant results is 12:
+```{r}
+sum(pValues<0.05)
+```
+
+The list of *rejected* null hyopthesis is therefore the following:
+
+```{r}
+TestName.pairs[(pValues<0.05)]
+```
+
+And the hypothesis that we failed to reject are:
+```{r}
+TestName.pairs[(pValues>0.05)]
+```
+
+# Conclusions
+
+We can therefore safely state (with 5% error rate) that our inital observations were correct:
+
+* For both delivery methods, a higher dose produces a higher effect
+* Doses being equal, orange juice is more effective, except for the higher dose level
